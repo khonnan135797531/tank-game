@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Xe tăng mini</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; background: #18231d; color: #f2f5e9;
+    font-family: system-ui, Arial, sans-serif; display: grid; place-items: center;
+  }
+  .wrap { width: min(960px, 96vw); padding: 16px 0 22px; }
+  h1 { margin: 0 0 6px; font-size: clamp(22px, 4vw, 32px); }
+  .help { margin: 0 0 12px; color: #d3dfcc; line-height: 1.5; font-size: 14px; }
+  .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+  .badge { background: #29382d; padding: 7px 11px; border-radius: 9px; font-size: 13px; }
+  button { border: 0; border-radius: 9px; padding: 8px 13px; font-weight: 700; cursor: pointer; }
+  #reset { background: #e7edce; color: #243024; }
+  canvas {
+    display: block; width: 100%; height: auto; border: 3px solid #647b51;
+    border-radius: 12px; background: #85a95d; box-shadow: 0 12px 30px #0005;
+    cursor: crosshair; touch-action: none;
+  }
+  .note { color: #aebdaa; font-size: 12px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🪖 Xe tăng mini</h1>
+  <p class="help">Lái xe tăng quanh bãi cỏ và thử bắn phá cây, nhà nhé. Đây là bản thử nghiệm nhỏ, chưa cần cài đặt gì.</p>
+  <div class="bar">
+    <span class="badge" id="score">🎯 Mục tiêu đã phá: 0</span>
+    <span class="badge">WASD / phím mũi tên: di chuyển</span>
+    <span class="badge">Chuột / Space: bắn</span>
+    <button id="reset">Chơi lại</button>
+  </div>
+  <canvas id="game" width="900" height="560" aria-label="Game xe tăng mini"></canvas>
+  <div class="note">Mẹo: xe tăng xoay nòng theo vị trí con trỏ chuột. Trên điện thoại, chạm vào hướng muốn bắn và dùng các phím trên màn hình.</div>
+</div>
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const scoreEl = document.getElementById('score');
+  const W = canvas.width, H = canvas.height;
+  const keys = new Set();
+  let score = 0, bullets = [], particles = [], targets = [], lastShot = 0;
+  const tank = { x: 110, y: 280, angle: 0, speed: 0, radius: 19 };
+  const pointer = { x: 400, y: 280 };
+  const blocked = (x,y,r=20) => targets.some(t => Math.hypot(t.x-x,t.y-y) < r+t.r+5);
+
+  function makeTargets() {
+    targets = [];
+    const items = [
+      ['tree', 270, 125], ['tree', 390, 390], ['tree', 555, 120],
+      ['tree', 735, 405], ['tree', 815, 180], ['house', 690, 155],
+      ['house', 435, 250], ['house', 245, 430]
+    ];
+    for (const [type,x,y] of items) targets.push({type,x,y,hp:type==='tree'?1:3,max:type==='tree'?1:3,r:type==='tree'?21:27});
+  }
+  makeTargets();
+
+  function reset() {
+    score=0; bullets=[]; particles=[]; tank.x=110; tank.y=280; tank.angle=0; tank.speed=0;
+    makeTargets(); scoreEl.textContent='🎯 Mục tiêu đã phá: 0';
+  }
+  document.getElementById('reset').addEventListener('click', reset);
+
+  window.addEventListener('keydown', e => {
+    if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
+    keys.add(e.key.toLowerCase());
+    if (e.code === 'Space') shoot();
+  });
+  window.addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
+
+  function getPointer(e) {
+    const r = canvas.getBoundingClientRect();
+    pointer.x = (e.clientX-r.left)*W/r.width;
+    pointer.y = (e.clientY-r.top)*H/r.height;
+  }
+  canvas.addEventListener('pointermove', getPointer);
+  canvas.addEventListener('pointerdown', e => { getPointer(e); shoot(); });
+
+  function shoot() {
+    const now=performance.now();
+    if (now-lastShot<230) return;
+    lastShot=now;
+    const a=tank.angle;
+    bullets.push({x:tank.x+Math.cos(a)*29,y:tank.y+Math.sin(a)*29,
+      vx:Math.cos(a)*7.5,vy:Math.sin(a)*7.5,life:100});
+  }
+
+  function burst(x,y,color,n=12) {
+    for(let i=0;i<n;i++){
+      const a=Math.random()*Math.PI*2, s=1+Math.random()*3;
+      particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:22+Math.random()*18,color});
+    }
+  }
+
+  function update() {
+    let dx=0,dy=0;
+    if(keys.has('w')||keys.has('arrowup')) dy-=1;
+    if(keys.has('s')||keys.has('arrowdown')) dy+=1;
+    if(keys.has('a')||keys.has('arrowleft')) dx-=1;
+    if(keys.has('d')||keys.has('arrowright')) dx+=1;
+    if(dx||dy){
+      const len=Math.hypot(dx,dy); dx/=len; dy/=len;
+      const nx=Math.max(22,Math.min(W-22,tank.x+dx*2.7));
+      const ny=Math.max(22,Math.min(H-22,tank.y+dy*2.7));
+      if(!blocked(nx,ny, tank.radius)){tank.x=nx;tank.y=ny;}
+    }
+    tank.angle=Math.atan2(pointer.y-tank.y,pointer.x-tank.x);
+
+    bullets.forEach(b=>{
+      b.x+=b.vx;b.y+=b.vy;b.life--;
+      for(let i=targets.length-1;i>=0;i--){
+        const t=targets[i];
+        if(Math.hypot(b.x-t.x,b.y-t.y)<t.r+4){
+          t.hp--; b.life=0; burst(b.x,b.y,'#ffd36b',5);
+          if(t.hp<=0){
+            burst(t.x,t.y,t.type==='tree'?'#4d6d38':'#c9a27a',22);
+            targets.splice(i,1); score++;
+            scoreEl.textContent='🎯 Mục tiêu đã phá: '+score;
+          }
+          break;
+        }
+      }
+    });
+    bullets=bullets.filter(b=>b.life>0&&b.x>-5&&b.x<W+5&&b.y>-5&&b.y<H+5);
+    particles.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.vx*=.96;p.vy*=.96;p.life--;});
+    particles=particles.filter(p=>p.life>0);
+  }
+
+  function drawGround() {
+    ctx.fillStyle='#86ad60';ctx.fillRect(0,0,W,H);
+    // Các vệt cỏ nhẹ
+    ctx.strokeStyle='#779e54';ctx.lineWidth=1;
+    for(let y=20;y<H;y+=38) for(let x=(y%76?8:25);x<W;x+=48){
+      ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+5,y-2);ctx.stroke();
+    }
+    // Đường đất
+    ctx.fillStyle='#b8a477';
+    ctx.beginPath();ctx.moveTo(0,505);ctx.quadraticCurveTo(240,470,420,520);
+    ctx.quadraticCurveTo(670,555,900,485);ctx.lineTo(900,560);ctx.lineTo(0,560);ctx.fill();
+    ctx.fillStyle='#c9b58a';
+    for(let i=0;i<28;i++){const x=(i*137+45)%W,y=510+(i*29)%45;ctx.fillRect(x,y,3,2);}
+  }
+
+  function drawTree(t) {
+    ctx.fillStyle='#54733c';ctx.beginPath();ctx.ellipse(t.x+3,t.y+8,23,17,0,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#765637';ctx.fillRect(t.x-4,t.y+1,8,17);
+    ctx.fillStyle='#315d35';ctx.beginPath();ctx.arc(t.x,t.y-3,21,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#477c3d';ctx.beginPath();ctx.arc(t.x-7,t.y-9,12,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#67934a';ctx.beginPath();ctx.arc(t.x+7,t.y-7,10,0,Math.PI*2);ctx.fill();
+    if(t.hp<t.max){ctx.fillStyle='#243024';ctx.fillRect(t.x-18,t.y-34,36,5);ctx.fillStyle='#e9d778';ctx.fillRect(t.x-18,t.y-34,36*t.hp/t.max,5);}
+  }
+
+  function drawHouse(t) {
+    ctx.fillStyle='#718052';ctx.fillRect(t.x-27,t.y-20,58,48);
+    ctx.fillStyle='#d4c19a';ctx.fillRect(t.x-25,t.y-26,50,48);
+    ctx.fillStyle='#8b5740';ctx.beginPath();ctx.moveTo(t.x-33,t.y-24);ctx.lineTo(t.x,t.y-49);ctx.lineTo(t.x+33,t.y-24);ctx.closePath();ctx.fill();
+    ctx.fillStyle='#6b4935';ctx.fillRect(t.x-7,t.y-1,14,23);
+    ctx.fillStyle='#8cb7bf';ctx.fillRect(t.x-19,t.y-17,10,10);ctx.fillRect(t.x+9,t.y-17,10,10);
+    ctx.strokeStyle='#6d4c37';ctx.lineWidth=2;ctx.strokeRect(t.x-19,t.y-17,10,10);ctx.strokeRect(t.x+9,t.y-17,10,10);
+    if(t.hp<t.max){ctx.fillStyle='#243024';ctx.fillRect(t.x-20,t.y-60,40,5);ctx.fillStyle='#e9d778';ctx.fillRect(t.x-20,t.y-60,40*t.hp/t.max,5);}
+  }
+
+  function drawTank() {
+    ctx.save();ctx.translate(tank.x,tank.y);ctx.rotate(tank.angle);
+    // bóng
+    ctx.fillStyle='#526342';ctx.beginPath();ctx.ellipse(2,5,27,20,0,0,Math.PI*2);ctx.fill();
+    // bánh xích
+    ctx.fillStyle='#303a31';ctx.fillRect(-22,-17,44,34);
+    ctx.fillStyle='#56634c';ctx.fillRect(-17,-13,34,26);
+    for(let x=-15;x<=15;x+=10){
+      ctx.fillStyle='#a4ad85';ctx.fillRect(x,-16,4,4);ctx.fillRect(x,12,4,4);
+    }
+    // thân
+    ctx.fillStyle='#577c43';ctx.fillRect(-17,-12,34,24);
+    ctx.fillStyle='#769b50';ctx.fillRect(-12,-9,23,18);
+    // nòng súng
+    ctx.fillStyle='#3d5134';ctx.fillRect(4,-4,29,8);
+    ctx.fillStyle='#91a76a';ctx.fillRect(25,-3,8,6);
+    // tháp pháo
+    ctx.fillStyle='#45663a';ctx.beginPath();ctx.arc(0,0,10,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#789b51';ctx.beginPath();ctx.arc(-2,-2,6,0,Math.PI*2);ctx.fill();
+    ctx.restore();
+  }
+
+  function draw() {
+    drawGround();
+    targets.forEach(t=>t.type==='tree'?drawTree(t):drawHouse(t));
+    bullets.forEach(b=>{
+      ctx.fillStyle='#fff0a5';ctx.beginPath();ctx.arc(b.x,b.y,4,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle='#e9a83c';ctx.beginPath();ctx.arc(b.x,b.y,2,0,Math.PI*2);ctx.fill();
+    });
+    particles.forEach(p=>{ctx.globalAlpha=Math.max(0,p.life/35);ctx.fillStyle=p.color;ctx.fillRect(p.x,p.y,4,4);});
+    ctx.globalAlpha=1;
+    drawTank();
+    if(targets.length===0){
+      ctx.fillStyle='#17231ddd';ctx.fillRect(210,220,480,100);
+      ctx.fillStyle='#fff7d8';ctx.textAlign='center';ctx.font='bold 28px system-ui';
+      ctx.fillText('Dọn sạch bãi rồi! 🎉',W/2,263);
+      ctx.font='16px system-ui';ctx.fillText('Bấm “Chơi lại” để phá tiếp',W/2,292);
+    }
+  }
+
+  function loop(){update();draw();requestAnimationFrame(loop);}
+  loop();
+})();
+</script>
+</body>
+</html>
